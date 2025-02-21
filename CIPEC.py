@@ -1,3 +1,4 @@
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -15,11 +16,21 @@ from tqdm.notebook import tqdm
 import os.path
 import csv
 
-##############################################################
+############################################## GENERAL ###############################################
+
+def write(data,filename):
+    with open(filename, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerows(data)
+        
 
 def gram_matrix(B):
     
-    """ naive Gram matrix """
+    """ 
+    Naive Gram matrix 
+    input: list of basis elements 
+    output: Gram matrix
+    """
     
     d = len(B)
     G = 1.j*np.zeros([d,d])
@@ -33,7 +44,11 @@ def gram_matrix(B):
 
 def update_gram_matrix(oldG, B_prev, new_channel):
     
-    """ more efficient Gram matrix that only adds a new row/column to an old one """
+    """ 
+    More efficient Gram matrix that updates an existing one by adding a new row/column
+    input: old Gram matrix, list of previous basis elements, new element to add
+    output: new Gram matrix
+    """    
     
     d = len(oldG)
     G = np.zeros((d+1,d+1), dtype='complex_')
@@ -43,10 +58,13 @@ def update_gram_matrix(oldG, B_prev, new_channel):
         G[-1,ii] = G[ii,-1].conj()
     G[-1,-1] = np.trace(new_channel.conj().T@new_channel, dtype='complex_')
     return G
+    
+    
+############################################## NOISELESS ###############################################    
 
 def clifford_T_channels(n_qubits, include_T=True):
 
-    """ returns dict of unitary channels in Choi representation """
+    """ returns dict of unitary channels in the Choi representation """  
 
     # 1q gates
     I = np.eye(2)
@@ -136,17 +154,17 @@ def state_prep_channels(n_qubits):
 
     return channels
 
-
-
-def write(data,filename):
-    with open(filename, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerows(data)
         
 
 def noiseless_basis(nqubits, include_T=True):
     
-    """ builds a minimal basis by selecting LI sequences of unitary channels, then adding state prep channels """
+    """
+    Brute force construction of a minimal basis:
+    - lists all sequences of unitary channels up length 4 
+    - add them one by one until rank(Gram matrix) becomes maximal
+    - then add state prep channels to complete the non-unital directions
+    - returns dict of channels B = {name: choi_matrix}
+    """
 
     # filename to export (in case of first run) or import (if already ran before)
     if include_T:
@@ -248,7 +266,36 @@ def noiseless_basis(nqubits, include_T=True):
           print(f"Unable to span the entire space of CPTPs")
 
     return B
-		
-	
-def apply_noise(B, noise):    
-	return {k:qi.liouville_to_choi(noise.to_liouville()@qi.choi_to_liouville(v)) for k,v in B.items()}
+
+
+
+############################################## NOISY ###############################################
+
+
+def apply_noise_to_channel(noise,channel):  
+
+    """
+    Apply noise to a channel
+    Input: noise object from qibo, channel in Choi rep
+    Output: noisy channel in Choi form
+    """
+    return qi.liouville_to_choi(noise.to_liouville()@qi.choi_to_liouville(channel))
+    
+    
+def apply_noise_to_basis(B,noise_model):
+
+    """ Constructs a noisy version of a basis B and checks if it's still a basis """
+
+    # Noisy basis
+    B_noisy = {k:apply_noise_to_channel(noise_model[k],B[k]) for k in B.keys()}
+    print(f'Applied noise model to basis elements')
+
+    # Gram matrix and LI check
+    G = gram_matrix(list(B_noisy.values()))
+    rank = np.linalg.matrix_rank(G)
+    if rank == len(B):
+        print(f'The noisy channels form a basis! :)')
+    else:
+        print(f"No longer a basis! :(\nOnly spanned {rank} directions")   
+    
+    return B_noisy
