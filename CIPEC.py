@@ -189,7 +189,7 @@ def noiseless_basis(nqubits, include_T=True):
                     new_channel = qi.choi_to_liouville(unitary_channels[k[i]])@new_channel
             new_channel = qi.liouville_to_choi(new_channel)
             B[k] = new_channel
-        print('Loaded pre-computed basis')
+        print(f'Loaded pre-computed basis "{filename}"')
 
     # if not then let's compute
     else:
@@ -266,6 +266,25 @@ def noiseless_basis(nqubits, include_T=True):
           print(f"Unable to span the entire space of CPTPs")
 
     return B
+
+
+
+
+def decomposition_coefficients(U, B):
+
+    """ 
+    computes the coeffs of a channel in a basis B by solving a linear system 
+    Input: target U (Choi), list of basis elements (Choi)
+    Output: vector of coeffs
+    """
+
+    # vectorize all the matrices
+    U_vectorized = U.flatten()
+    B_vectorized = [b.flatten() for b in B.values()]
+    
+    coeffs = U_vectorized@np.linalg.pinv(B_vectorized)
+
+    return coeffs
 
 
 
