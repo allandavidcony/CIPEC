@@ -318,3 +318,18 @@ def apply_noise_to_basis(B,noise_model):
         print(f"No longer a basis! :(\nOnly spanned {rank} directions")   
     
     return B_noisy
+
+
+def params_basic_2q(params_basic):
+
+    """"""
+    params = {}
+    
+    for gate in ('CX','XC'):
+        params[gate] = params_basic[gate]
+    for gate in itertools.product(['I','H','S','T'],['I','H','S','T']):
+        params[gate[0]+gate[1]] = params_basic[gate[0]]+params_basic[gate[1]]
+    for gate in itertools.product(['I','Px','Py','Pz'],['I','Px','Py','Pz']):
+        params[gate[0]+gate[1]] = params_basic[gate[0]]+params_basic[gate[1]]    
+        
+    return params     
