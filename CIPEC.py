@@ -2,6 +2,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+from sympy import Matrix
+from IPython.display import display
+
+
 from qibo import quantum_info as qi
 from qibo import gates, set_backend
 from qibo.backends import NumpyBackend
@@ -17,6 +21,9 @@ import os.path
 import csv
 
 ############################################## GENERAL ###############################################
+def disp(a=np.eye(2), rnd: int = 3):
+    display(Matrix(a.round(rnd)))
+    
 
 def write(data,filename):
     with open(filename, mode='w', newline='') as file:
@@ -27,20 +34,14 @@ def write(data,filename):
 def gram_matrix(B):
     
     """ 
-    Naive Gram matrix 
-    input: list of basis elements 
-    output: Gram matrix
+    Input: list of basis elements 
+    Output: Gram matrix
     """
     
-    d = len(B)
-    G = 1.j*np.zeros([d,d])
-    for ii in range(d):
-        for jj in range(ii+1,d):
-            G[ii,jj] = np.trace(B[ii].conj().T@B[jj])
-    G = (G+G.conj().T)
-    for ii in range(d):
-        G[ii,ii] = np.trace(B[ii].conj().T@B[ii])
+    G = np.array([[qi.hilbert_schmidt_inner_product(u1, u2) for u1 in B] for u2 in B])
+    
     return G
+    
 
 def update_gram_matrix(oldG, B_prev, new_channel):
     
@@ -54,9 +55,10 @@ def update_gram_matrix(oldG, B_prev, new_channel):
     G = np.zeros((d+1,d+1), dtype='complex_')
     G[:-1,:-1] = oldG
     for ii in range(d):
-        G[ii,-1] = np.trace(B_prev[ii].conj().T@new_channel, dtype='complex_')
+        G[ii,-1] = qi.hilbert_schmidt_inner_product(B_prev[ii],new_channel) 
         G[-1,ii] = G[ii,-1].conj()
-    G[-1,-1] = np.trace(new_channel.conj().T@new_channel, dtype='complex_')
+    G[-1,-1] = qi.hilbert_schmidt_inner_product(new_channel,new_channel)
+    
     return G
     
     
@@ -66,50 +68,32 @@ def clifford_T_channels(n_qubits, include_T=True):
 
     """ returns dict of unitary channels in the Choi representation """  
 
-    # 1q gates
-    I = np.eye(2)
-    H = (1.0/np.sqrt(2.0))*np.array(np.array([[1.,  1.],[1., -1.]]))
-    S = np.array(np.array([[1., 0.],[0., 1.j]]))
-    T = np.array(np.array([[1., 0.],[0., np.exp(1j*np.pi/4.)]]))
-
-    # 2q gates
-    II = np.eye(2**2)
-    HI = np.kron(H,I)
-    IH = np.kron(I,H)
-    SI = np.kron(S,I)
-    IS = np.kron(I,S)
-    TI = np.kron(T,I)
-    IT = np.kron(I,T)
-    HS = np.kron(H,S)
-    SH = np.kron(S,H)
-    HT = np.kron(H,T)
-    TH = np.kron(T,H)
-    TS = np.kron(T,S)
-    ST = np.kron(S,T)
-    CX = np.array([[1., 0., 0., 0.],[0., 1., 0., 0.],[0., 0., 0., 1.],[0., 0., 1., 0.]])
-    XC = np.array([[1., 0., 0., 0.],[0., 0., 0., 1.],[0., 0., 1., 0.],[0., 1., 0., 0.]])
-
+    # gateset
+    I = gates.I(0).matrix() 
+    H = gates.H(0).matrix() 
+    S = gates.S(0).matrix() 
+    T = gates.T(0).matrix() 
+    CX = gates.CNOT(0,1).matrix() 
+    gateset_dict = {'I':I, 'H': H, 'S': S, 'T': T, 'CX': CX}
+     
     # corresponding channels in Choi rep.
     if n_qubits == 1:
-        unitary_gates = {"H": H, "S": S}
-        if include_T:
-            unitary_gates["T"] = T
+        unitary_gates = {k:v for k,v in gateset_dict.items() if k!='CX'}
 
     if n_qubits == 2:
-        unitary_gates = {"HI": HI, "IH": IH, "SI": SI, "IS": IS, "HS": HS, "SH": SH, "CX": CX, "XC": XC}
-        if include_T:
-            unitary_gates["TI"] = TI
-            unitary_gates["IT"] = IT
-            unitary_gates["HT"] = HT
-            unitary_gates["TH"] = TH
-            unitary_gates["ST"] = ST
-            unitary_gates["TS"] = TS
-#         unitary_gates = {"HI": HI, "IH": IH, "SI": SI, "IS": IS, "TI": TI, "IT": IT,"HS": HS,
-#                          "HT": HT, "SH": SH, "ST": ST, "TS": TS, "TH": TH, "CX": CX, "XC": XC}
+        keys = itertools.product(['I','H','S','T'],['I','H','S','T'])
+        unitary_gates = {''.join(k):np.kron(gateset_dict[k[0]],gateset_dict[k[1]]) for k in keys}
+        unitary_gates['CX'] = CX
+                
+    if not include_T:
+        has_T = [k for k in list(unitary_gates.keys()) if 'T' in k]
+        for k in has_T:
+            del unitary_gates[k]
 
     unitary_channels = {k:qi.to_choi(v) for k,v in unitary_gates.items()}
 
     return unitary_channels
+    
 
 def state_prep_channels(n_qubits):
 
@@ -322,7 +306,10 @@ def apply_noise_to_basis(B,noise_model):
 
 def params_basic_2q(params_basic):
 
-    """"""
+    """ 
+    Input: depolarizing parameters for H, S, T, CX, XC, Px, Py, Pz
+    Output: depolarizing parameters for CX, XC and tensor products of [I,H,S,T] and of [I,Px,Py,Pz]
+    """
     params = {}
     
     for gate in ('CX','XC'):
