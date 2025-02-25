@@ -78,7 +78,7 @@ def update_gram_matrix(oldG, B_prev, new_channel):
     
 ############################################## NOISELESS ###############################################    
 
-def clifford_T_channels(n_qubits, include_T=True):
+def clifford_T_channels(nqubits, include_T=True):
 
     """ returns dict of unitary channels in the Choi representation """  
 
@@ -92,10 +92,10 @@ def clifford_T_channels(n_qubits, include_T=True):
     gateset_dict = {'I':I, 'H': H, 'S': S, 'T': T, 'CX': CX}
      
     # corresponding channels in Choi rep.
-    if n_qubits == 1:
+    if nqubits == 1:
         unitary_gates = {k:v for k,v in gateset_dict.items() if k not in set(['CX'])}
 
-    if n_qubits == 2:
+    if nqubits == 2:
         keys = itertools.product(['I','H','S','T'],['I','H','S','T'])
         unitary_gates = {''.join(k):np.kron(gateset_dict[k[0]],gateset_dict[k[1]]) for k in keys}
         unitary_gates['CX'] = CX
@@ -111,7 +111,7 @@ def clifford_T_channels(n_qubits, include_T=True):
     return unitary_channels
     
 
-def state_prep_channels(n_qubits):
+def state_prep_channels(nqubits):
 
     """ returns dict of |+>, |+y> and |0> state prep channels in Choi representation """
 
@@ -142,10 +142,10 @@ def state_prep_channels(n_qubits):
     projector_0z0z = np.kron(projector_0z,projector_0z)
 
     # corresponding channels in Choi rep.
-    if n_qubits == 1:
+    if nqubits == 1:
         channels = {"Px": np.kron(projector_0x, I), "Py": np.kron(projector_0y, I), "Pz": np.kron(projector_0z, I)}
 
-    if n_qubits == 2:
+    if nqubits == 2:
         channels = {"PxI": np.kron(projector_0xI, II), "PyI": np.kron(projector_0yI, II), "PzI": np.kron(projector_0zI, II),
                     "IPx": np.kron(Iprojector_0x, II), "IPy": np.kron(Iprojector_0y, II), "IPz": np.kron(Iprojector_0z, II),
                     "PxPx": np.kron(projector_0x0x, II), "PxPy": np.kron(projector_0x0y, II), "PxPz": np.kron(projector_0x0z, II),
@@ -313,6 +313,53 @@ def decomposition_coefficients(U, B):
     coeffs = U_vectorized@np.linalg.pinv(B_vectorized)
 
     return coeffs
+
+
+
+def clifford_dim(nqubits,ignore_global_phase=True):
+    dim = 2**(nqubits**2+2*nqubits)*np.prod([4**j-1 for j in range(1,nqubits+1)])
+    if not ignore_global_phase:
+        dim = 8*dim
+    return dim
+
+
+
+def clifford_group(nqubits,ignore_global_phase=True):
+
+    """ Builds the single-qubit Clifford group using Ross&Sellinger's decomposition """
+
+    if nqubits == 1:
+        H = gates.H(0).matrix()
+        S = gates.S(0).matrix()
+        X = gates.X(0).matrix()
+        omega = np.exp(1j*np.pi/4.)
+        E = (omega**3)*H@S@S@S
+        C1 = {}
+        if ignore_global_phase:
+            for j,k,l in itertools.product(range(3),range(2),range(4)):
+                key = ('I' if j+k+l==0 else 'HSSS'*j+'HSSH'*k+'S'*l)
+                C1[key] = np.linalg.matrix_power(E,j)@np.linalg.matrix_power(X,k)@np.linalg.matrix_power(S,l)
+        else:
+            for i,j,k,l in itertools.product(range(8),range(3),range(2),range(4)):
+                key = ('I' if i+j+k+l==0 else f"omega^{i}"+'HSSS'*j+'HSSH'*k+'S'*l)
+                C1[key] = (omega**i)*np.linalg.matrix_power(E,j)@np.linalg.matrix_power(X,k)@np.linalg.matrix_power(S,l)
+        return C1
+
+    ########## UNDER CONSTRUCTION
+    if nqubits == 2:
+        from scipy.linalg import expm
+        CNOT = gates.CNOT(0,1).matrix()
+        C1 = clifford_group(1, ignore_global_phase)
+        RS = qi.to_pauli_liouville(expm(-1j*(gates.X(0).matrix()+gates.Y(0).matrix()+gates.Z(0).matrix())/np.sqrt(27.)))
+        S1 = {'I': np.eye(4), 'RS': RS, 'RSRS': RS@RS}
+        C2 = {}
+        for k1,k2 in itertools.product(C1.keys(),C1.keys()):
+            kron = np.kron(C1[k1],C1[k2])
+            C2[k1+'\otimes '+k2] = kron
+            # for k3 in itertools.product(S1.keys()):
+            #     print(k3)
+            #     C2[k1+'\otimes '+k2+'.CNOT.'+k3] = kron@CNOT@(S1[k3]) 
+        return C2
 
 
 
