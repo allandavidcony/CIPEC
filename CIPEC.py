@@ -7,7 +7,7 @@ from IPython.display import display, Math, Latex
 
 
 from qibo import quantum_info as qi
-from qibo import gates, set_backend
+from qibo import Circuit, gates, matrices, set_backend
 from qibo.backends import NumpyBackend
 from qibo.noise import NoiseModel, DepolarizingError
 from qibo.quantum_info.metrics import diamond_norm
@@ -88,7 +88,7 @@ def clifford_T_channels(nqubits, include_T=True):
     S = gates.S(0).matrix() 
     T = gates.T(0).matrix() 
     CX = gates.CNOT(0,1).matrix() 
-    # XC = gates.CNOT(1,0).matrix() 
+    XC = np.array([[1., 0., 0., 0.],[0., 0., 0., 1.],[0., 0., 1., 0.],[0., 1., 0., 0.]])
     gateset_dict = {'I':I, 'H': H, 'S': S, 'T': T, 'CX': CX}
      
     # corresponding channels in Choi rep.
@@ -201,7 +201,7 @@ def noiseless_basis(nqubits, include_T=True):
 
         # Sequences of unitary channels
         letters = list(unitary_channels.keys())
-        print(f'Using letters {letters}')
+        print(f'Using letters {letters}\n')
         
         B = {tuple([k]):v for k,v in list(unitary_channels.items())} # initiate basis with all words of L=1 since they are LI
         accepted_keys = [tuple([k]) for k in list(unitary_channels.keys())] 
@@ -324,42 +324,62 @@ def clifford_dim(nqubits,ignore_global_phase=True):
 
 
 
-def clifford_group(nqubits,ignore_global_phase=True):
+def clifford_group(nqubits,ignore_global_phase=True,letters='HS'):
 
     """ Builds the single-qubit Clifford group using Ross&Sellinger's decomposition """
+    
+    H = gates.H(0).matrix()
+    S = gates.S(0).matrix()
+    X = gates.X(0).matrix() # H@S@S@H
+    omega = np.exp(1j*np.pi/4.)
+    E = (omega**3)*H@S@S@S    
 
     if nqubits == 1:
-        H = gates.H(0).matrix()
-        S = gates.S(0).matrix()
-        X = gates.X(0).matrix()
-        omega = np.exp(1j*np.pi/4.)
-        E = (omega**3)*H@S@S@S
         C1 = {}
         if ignore_global_phase:
             for j,k,l in itertools.product(range(3),range(2),range(4)):
-                key = ('I' if j+k+l==0 else 'HSSS'*j+'HSSH'*k+'S'*l)
+                if letters=='HS':
+                    key = ('I' if j+k+l==0 else f'\omega^{3*j}'+f'HSSS'*j+'HSSH'*k+'S'*l)
+                if letters=='SEX':
+                    key = ('I' if j+k+l==0 else 'E'*j+'X'*k+'S'*l)
                 C1[key] = np.linalg.matrix_power(E,j)@np.linalg.matrix_power(X,k)@np.linalg.matrix_power(S,l)
         else:
             for i,j,k,l in itertools.product(range(8),range(3),range(2),range(4)):
-                key = ('I' if i+j+k+l==0 else f"omega^{i}"+'HSSS'*j+'HSSH'*k+'S'*l)
+                if letters=='HS':
+                    key = ('I' if i+j+k+l==0 else f"\omega^{i+3*j}"+'HSSS'*j+'HSSH'*k+'S'*l)
+                if letters=='SEX':
+                    key = ('I' if i+j+k+l==0 else 'E'*j+'X'*k+'S'*l)
                 C1[key] = (omega**i)*np.linalg.matrix_power(E,j)@np.linalg.matrix_power(X,k)@np.linalg.matrix_power(S,l)
         return C1
 
-    ########## UNDER CONSTRUCTION
     if nqubits == 2:
-        from scipy.linalg import expm
-        CNOT = gates.CNOT(0,1).matrix()
-        C1 = clifford_group(1, ignore_global_phase)
-        RS = qi.to_pauli_liouville(expm(-1j*(gates.X(0).matrix()+gates.Y(0).matrix()+gates.Z(0).matrix())/np.sqrt(27.)))
-        S1 = {'I': np.eye(4), 'RS': RS, 'RSRS': RS@RS}
-        C2 = {}
-        for k1,k2 in itertools.product(C1.keys(),C1.keys()):
-            kron = np.kron(C1[k1],C1[k2])
-            C2[k1+'\otimes '+k2] = kron
-            # for k3 in itertools.product(S1.keys()):
-            #     print(k3)
-            #     C2[k1+'\otimes '+k2+'.CNOT.'+k3] = kron@CNOT@(S1[k3]) 
-        return C2
+        if ignore_global_phase:
+            from scipy.linalg import expm
+            # RS = np.array(expm(-1j*np.pi*(gates.X(0).matrix()+gates.Y(0).matrix()+gates.Z(0).matrix())/np.sqrt(27.)))
+            # fancy_display(RS,'RS')
+            # fancy_display(-E,'-E')
+            RS = -E 
+            CNOT = gates.CNOT(0,1).matrix()
+            iSWAP = gates.iSWAP(0,1).matrix()
+            SWAP = gates.SWAP(0,1).matrix()
+            
+            C1 = clifford_group(1, ignore_global_phase,letters)
+            if letters=='HS':
+                S1 = {'I': np.eye(2), f'-\omega^{3}HSSS': RS, f'\omega^{6}HSSSHSSS': RS@RS}
+            if letters=='SEX':
+                S1 = {'I': np.eye(2), '-E': RS, 'EE': RS@RS}                
+            C2 = {}
+            for k1,k2 in itertools.product(C1.keys(),C1.keys()):
+                kron = np.kron(C1[k1],C1[k2])
+                C2['('+k1+'\otimes '+k2+')'] = kron
+                for k3,k4 in itertools.product(S1.keys(),S1.keys()):
+                    C2['('+k1+'\otimes '+k2+').CNOT.('+k3+'\otimes '+k4+')'] = kron@CNOT@np.kron(S1[k3],S1[k4])
+                    C2['('+k1+'\otimes '+k2+').iSWAP.('+k3+'\otimes '+k4+')'] = kron@iSWAP@np.kron(S1[k3],S1[k4])
+                C2['('+k1+'\otimes '+k2+').SWAP'] = kron@SWAP
+            return C2
+        else: 
+            print("Not implemented")
+            return None
 
 
 
