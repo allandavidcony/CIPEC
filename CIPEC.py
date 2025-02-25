@@ -383,7 +383,7 @@ def clifford_group(nqubits,ignore_global_phase=True,letters='HS'):
             return None
 
 
-def random_clifford(nqubits,size,ignore_global_phase=True,letters='HS'):
+def random_clifford(nqubits,size=1,ignore_global_phase=True,letters='HS'):
     
     """ Samples one element from the list of all Cliffords """
     
@@ -392,44 +392,54 @@ def random_clifford(nqubits,size,ignore_global_phase=True,letters='HS'):
     return {k:C[k] for k in random_keys}
     
     
-    
-def random_U_with_fixed_T_count(nqubits,n_T,ignore_global_phase=True,letters='HS'):
 
-    """ bugs to fix: sometimes it fails for n=1, and also it is counting #(T layers) instead of #(T) """
+def random_U_fixed_T(nqubits, nT, ignore_global_phase=True, letters='HS'):    
 
     I = np.eye(2)
     T = gates.T(0).matrix()
-    
+    T_dict= {'I': I, 'T': T}
+
     if nqubits == 1:
-        T_dict = {'T': T} 
-    if nqubits==2:
-        T_dict = {'TI': np.kron(T,I),'IT': np.kron(I,T),'TT': np.kron(T,T)}
-    
-    cliffords = random_clifford(nqubits,n_T,ignore_global_phase,letters)
-    cliff_keys = list(cliffords.keys())
-    cliff_vals = list(cliffords.values())
-    T_keys_aux = np.random.choice(list(T_dict.keys()), n_T)
-    T_keys = T_keys_aux
-    # T_keys = []
-    # for i in range(len(T_keys_aux)):
-        # if np.sum([k.count('T') for k in T_keys]) < n_T:
-            # T_keys.append(T_keys_aux[i])
-    T_vals = [T_dict[k] for k in T_keys]
-    
-    U_dict = {}
-    k = ''
-    U = np.eye(2**nqubits)
-    for i in range(n_T):
-        U = T_vals[i]@cliff_vals[i]@U
-        if nqubits == 1:
-            k = f'{T_keys[i]}.{cliff_keys[i]}.{k}'
-        if nqubits == 2:
-            k = f'({T_keys[i][0]} \otimes {T_keys[i][1]}).{cliff_keys[i]}.{k}'
-    U_dict[k] = U
-    
-    return U_dict
+
+        if nT == 0:
+            c1 = random_clifford(nqubits,1,ignore_global_phase,letters)
+            c1k = list(c1.keys())[0]
+            c1u = list(c1.values())[0]
+            return c1k, c1u
         
-        
+        if nT > 0:
+            c2 = random_clifford(nqubits,1,ignore_global_phase,letters)
+            c2k = list(c2.keys())[0]
+            c2u = list(c2.values())[0]
+            return c2k+'.T.'+random_U_fixed_T(nqubits, nT-1, ignore_global_phase, letters)[0], c2u@T@random_U_fixed_T(nqubits, nT-1, ignore_global_phase, letters)[1]
+
+    if nqubits == 2:
+        if nT == 0:
+            c1 = random_clifford(nqubits,1,ignore_global_phase,letters)
+            return list(c1.keys())[0], list(c1.values())[0]
+
+        if nT == 1:
+            c2 = random_clifford(nqubits,1,ignore_global_phase,letters)
+            c2k = list(c2.keys())[0]
+            c2u = list(c2.values())[0]
+            Tcount = 0
+            while Tcount != 1: # making sure we sample exactly one T to add 
+                ks = np.random.choice(['I','T'],2)
+                Tcount = (ks[0]+ks[1]).count('T')
+            TT = np.kron(T_dict[ks[0]],T_dict[ks[1]])
+            return c2k+f'.{ks[0]} \otimes {ks[1]}.'+random_U_fixed_T(nqubits, nT-Tcount, ignore_global_phase, letters)[0], c2u@TT@random_U_fixed_T(nqubits, nT-Tcount, ignore_global_phase, letters)[1]
+
+        if nT > 1:
+            c2 = random_clifford(nqubits,1,ignore_global_phase,letters)
+            c2k = list(c2.keys())[0]
+            c2u = list(c2.values())[0]
+            Tcount = 0
+            while Tcount < 1: # making sure we sample at least one T to add 
+                ks = np.random.choice(['I','T'],2)
+                Tcount += (ks[0]+ks[1]).count('T')
+            TT = np.kron(T_dict[ks[0]],T_dict[ks[1]])
+            return c2k+f'.{ks[0]} \otimes {ks[1]}.'+random_U_fixed_T(nqubits, nT-Tcount, ignore_global_phase, letters)[0], c2u@TT@random_U_fixed_T(nqubits, nT-Tcount, ignore_global_phase, letters)[1]
+                
 
 
 ############################################## NOISY ###############################################
