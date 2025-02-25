@@ -326,7 +326,8 @@ def clifford_dim(nqubits,ignore_global_phase=True):
 
 def clifford_group(nqubits,ignore_global_phase=True,letters='HS'):
 
-    """ Builds the single-qubit Clifford group using Ross&Sellinger's decomposition """
+    """ Builds the single-qubit Clifford group using Ross&Sellinger's decomposition 
+    and the two-qubit Clifford group using https://arxiv.org/pdf/1210.7011"""
     
     H = gates.H(0).matrix()
     S = gates.S(0).matrix()
@@ -381,6 +382,54 @@ def clifford_group(nqubits,ignore_global_phase=True,letters='HS'):
             print("Not implemented")
             return None
 
+
+def random_clifford(nqubits,size,ignore_global_phase=True,letters='HS'):
+    
+    """ Samples one element from the list of all Cliffords """
+    
+    C = clifford_group(nqubits,ignore_global_phase,letters)
+    random_keys = np.random.choice(list(C.keys()),size)
+    return {k:C[k] for k in random_keys}
+    
+    
+    
+def random_U_with_fixed_T_count(nqubits,n_T,ignore_global_phase=True,letters='HS'):
+
+    """ bugs to fix: sometimes it fails for n=1, and also it is counting #(T layers) instead of #(T) """
+
+    I = np.eye(2)
+    T = gates.T(0).matrix()
+    
+    if nqubits == 1:
+        T_dict = {'T': T} 
+    if nqubits==2:
+        T_dict = {'TI': np.kron(T,I),'IT': np.kron(I,T),'TT': np.kron(T,T)}
+    
+    cliffords = random_clifford(nqubits,n_T,ignore_global_phase,letters)
+    cliff_keys = list(cliffords.keys())
+    cliff_vals = list(cliffords.values())
+    T_keys_aux = np.random.choice(list(T_dict.keys()), n_T)
+    T_keys = T_keys_aux
+    # T_keys = []
+    # for i in range(len(T_keys_aux)):
+        # if np.sum([k.count('T') for k in T_keys]) < n_T:
+            # T_keys.append(T_keys_aux[i])
+    T_vals = [T_dict[k] for k in T_keys]
+    
+    U_dict = {}
+    k = ''
+    U = np.eye(2**nqubits)
+    for i in range(n_T):
+        U = T_vals[i]@cliff_vals[i]@U
+        if nqubits == 1:
+            k = f'{T_keys[i]}.{cliff_keys[i]}.{k}'
+        if nqubits == 2:
+            k = f'({T_keys[i][0]} \otimes {T_keys[i][1]}).{cliff_keys[i]}.{k}'
+    U_dict[k] = U
+    
+    return U_dict
+        
+        
 
 
 ############################################## NOISY ###############################################
