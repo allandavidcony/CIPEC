@@ -19,6 +19,9 @@ from tqdm.notebook import tqdm
 
 import os.path
 import csv
+import time
+
+import cvxpy as cp
 
 ############################################## GENERAL ###############################################
 def disp(a=np.eye(2), rnd: int = 3):
@@ -301,7 +304,7 @@ def noiseless_basis(nqubits, include_T=True):
 def decomposition_coefficients(U, B):
 
     """ 
-    computes the coeffs of a channel in a basis B by solving a linear system 
+    Computes the coeffs of a channel in a **minimal** basis B by solving a linear system 
     Input: target U (Choi), list of basis elements (Choi)
     Output: vector of coeffs
     """
@@ -316,11 +319,49 @@ def decomposition_coefficients(U, B):
 
 
 
+
+def solve_LP(U, B, norm='l1',print_status=False):
+    
+    """ 
+    Computes the coeffs of a channel in an **arbitrary** basis B 
+    Input: target U (Choi), list of basis elements (Choi)
+    Output: vector of coeffs
+    """
+    
+    B = list(B.values())
+    
+    cj = cp.Variable((len(B)), complex=True)
+    Lambda = sum(cj[i]*B[i] for i in range(len(B)))
+
+    if norm=="l1":
+        constraints = [Lambda==U]
+        loss = sum(cp.abs(cj[i]) for i in range(len(B)))
+        prob = cp.Problem(cp.Minimize(cp.norm(cj,1)), constraints)
+      
+    if norm=="infinity":
+        delta = cp.Variable(1)
+        constraints  = [Lambda==U]
+        constraints += [delta>=0]
+        constraints += [cp.abs(cj[i])<=delta for i in range(len(B))]
+        prob = cp.Problem(cp.Minimize(cp.norm(cj,inf)), constraints)
+        
+    prob.solve()
+    if print_status:
+        print(f'    *** status: {prob.status} ***')
+
+    return prob.value, cj.value
+
+
+
+
+
 def clifford_dim(nqubits,ignore_global_phase=True):
     dim = 2**(nqubits**2+2*nqubits)*np.prod([4**j-1 for j in range(1,nqubits+1)])
     if not ignore_global_phase:
         dim = 8*dim
     return dim
+
+
 
 
 
@@ -381,6 +422,7 @@ def clifford_group(nqubits,ignore_global_phase=True,letters='HS'):
         else: 
             print("Not implemented")
             return None
+
 
 
 def random_clifford(nqubits,size=1,ignore_global_phase=True,letters='HS'):
