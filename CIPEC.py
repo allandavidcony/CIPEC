@@ -425,13 +425,13 @@ def clifford_group(nqubits,ignore_global_phase=True,letters='HS'):
 
 
 
-def random_clifford(nqubits,size=1,ignore_global_phase=True,letters='HS'):
+def random_clifford(nqubits,ignore_global_phase=True,letters='HS'):
     
     """ Samples one element from the list of all Cliffords """
     
     C = clifford_group(nqubits,ignore_global_phase,letters)
-    random_keys = np.random.choice(list(C.keys()),size)
-    return {k:C[k] for k in random_keys}
+    k = np.random.choice(list(C.keys()))
+    return k, C[k] #{k:C[k] for k in random_keys} 
     
     
 
@@ -444,26 +444,20 @@ def random_U_fixed_T(nqubits, nT, ignore_global_phase=True, letters='HS'):
     if nqubits == 1:
 
         if nT == 0:
-            c1 = random_clifford(nqubits,1,ignore_global_phase,letters)
-            c1k = list(c1.keys())[0]
-            c1u = list(c1.values())[0]
+            c1k, c1u = random_clifford(nqubits,ignore_global_phase,letters)
             return c1k, c1u
         
         if nT > 0:
-            c2 = random_clifford(nqubits,1,ignore_global_phase,letters)
-            c2k = list(c2.keys())[0]
-            c2u = list(c2.values())[0]
+            c2k, c2u = random_clifford(nqubits,ignore_global_phase,letters)
             return c2k+'.T.'+random_U_fixed_T(nqubits, nT-1, ignore_global_phase, letters)[0], c2u@T@random_U_fixed_T(nqubits, nT-1, ignore_global_phase, letters)[1]
 
     if nqubits == 2:
         if nT == 0:
-            c1 = random_clifford(nqubits,1,ignore_global_phase,letters)
-            return list(c1.keys())[0], list(c1.values())[0]
+            c1k, c1u = random_clifford(nqubits,ignore_global_phase,letters)
+            return c1k, c1u
 
         if nT == 1:
-            c2 = random_clifford(nqubits,1,ignore_global_phase,letters)
-            c2k = list(c2.keys())[0]
-            c2u = list(c2.values())[0]
+            c2k, c2u = random_clifford(nqubits,ignore_global_phase,letters)
             Tcount = 0
             while Tcount != 1: # making sure we sample exactly one T to add 
                 ks = np.random.choice(['I','T'],2)
@@ -472,9 +466,7 @@ def random_U_fixed_T(nqubits, nT, ignore_global_phase=True, letters='HS'):
             return c2k+f'.{ks[0]} \otimes {ks[1]}.'+random_U_fixed_T(nqubits, nT-Tcount, ignore_global_phase, letters)[0], c2u@TT@random_U_fixed_T(nqubits, nT-Tcount, ignore_global_phase, letters)[1]
 
         if nT > 1:
-            c2 = random_clifford(nqubits,1,ignore_global_phase,letters)
-            c2k = list(c2.keys())[0]
-            c2u = list(c2.values())[0]
+            c2k, c2u = random_clifford(nqubits,ignore_global_phase,letters)
             Tcount = 0
             while Tcount < 1: # making sure we sample at least one T to add 
                 ks = np.random.choice(['I','T'],2)
@@ -503,12 +495,13 @@ def apply_noise_to_basis(B,noise_model):
 
     # Noisy basis
     B_noisy = {k:apply_noise_to_channel(noise_model[k],B[k]) for k in B.keys()}
+    dsquared = len(noise_model[list(B.keys())[0]].to_liouville()) # useful for the span check below when B is an overcomplete basis
     print(f'Applied noise model to basis elements')
 
     # Gram matrix and LI check
     G = gram_matrix(list(B_noisy.values()))
     rank = np.linalg.matrix_rank(G)
-    if rank == len(B):
+    if rank == dsquared**2-dsquared+1:
         print(f'The noisy channels form a basis! :)')
     else:
         print(f"No longer a basis! :(\nOnly spanned {rank} directions")   
