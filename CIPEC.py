@@ -22,6 +22,7 @@ import csv
 import time
 
 import cvxpy as cp
+from scipy.linalg import expm
 
 ############################################## GENERAL ###############################################
 def disp(a=np.eye(2), rnd: int = 3):
@@ -431,7 +432,7 @@ def random_clifford(nqubits,ignore_global_phase=True,letters='HS'):
     
     C = clifford_group(nqubits,ignore_global_phase,letters)
     k = np.random.choice(list(C.keys()))
-    return k, C[k] #{k:C[k] for k in random_keys} 
+    return k, C[k] 
     
     
 
