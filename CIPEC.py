@@ -19,6 +19,10 @@ from tqdm.notebook import tqdm
 
 import os.path
 import csv
+import time
+
+import cvxpy as cp
+from scipy.linalg import expm
 
 ############################################## GENERAL ###############################################
 def disp(a=np.eye(2), rnd: int = 3):
@@ -301,7 +305,7 @@ def noiseless_basis(nqubits, include_T=True):
 def decomposition_coefficients(U, B):
 
     """ 
-    computes the coeffs of a channel in a basis B by solving a linear system 
+    Computes the coeffs of a channel in a **minimal** basis B by solving a linear system 
     Input: target U (Choi), list of basis elements (Choi)
     Output: vector of coeffs
     """
@@ -316,6 +320,42 @@ def decomposition_coefficients(U, B):
 
 
 
+
+def solve_LP(U, B, norm='l1',print_status=False):
+    
+    """ 
+    Computes the coeffs of a channel in an **arbitrary** basis B 
+    Input: target U (Choi), list of basis elements (Choi)
+    Output: vector of coeffs
+    """
+    
+    B = list(B.values())
+    
+    cj = cp.Variable((len(B)), complex=True)
+    Lambda = sum(cj[i]*B[i] for i in range(len(B)))
+
+    if norm=="l1":
+        constraints = [Lambda==U]
+        loss = sum(cp.abs(cj[i]) for i in range(len(B)))
+        prob = cp.Problem(cp.Minimize(cp.norm(cj,1)), constraints)
+      
+    if norm=="infinity":
+        delta = cp.Variable(1)
+        constraints  = [Lambda==U]
+        constraints += [delta>=0]
+        constraints += [cp.abs(cj[i])<=delta for i in range(len(B))]
+        prob = cp.Problem(cp.Minimize(cp.norm(cj,inf)), constraints)
+        
+    prob.solve()
+    if print_status:
+        print(f'    *** status: {prob.status} ***')
+
+    return prob.value, cj.value
+
+
+
+
+
 def clifford_dim(nqubits,ignore_global_phase=True):
     dim = 2**(nqubits**2+2*nqubits)*np.prod([4**j-1 for j in range(1,nqubits+1)])
     if not ignore_global_phase:
@@ -324,9 +364,12 @@ def clifford_dim(nqubits,ignore_global_phase=True):
 
 
 
+
+
 def clifford_group(nqubits,ignore_global_phase=True,letters='HS'):
 
-    """ Builds the single-qubit Clifford group using Ross&Sellinger's decomposition """
+    """ Builds the single-qubit Clifford group using Ross&Sellinger's decomposition 
+    and the two-qubit Clifford group using https://arxiv.org/pdf/1210.7011"""
     
     H = gates.H(0).matrix()
     S = gates.S(0).matrix()
@@ -383,6 +426,57 @@ def clifford_group(nqubits,ignore_global_phase=True,letters='HS'):
 
 
 
+def random_clifford(nqubits,ignore_global_phase=True,letters='HS'):
+    
+    """ Samples one element from the list of all Cliffords """
+    
+    C = clifford_group(nqubits,ignore_global_phase,letters)
+    k = np.random.choice(list(C.keys()))
+    return k, C[k] 
+    
+    
+
+def random_U_fixed_T(nqubits, nT, ignore_global_phase=True, letters='HS'):    
+
+    I = np.eye(2)
+    T = gates.T(0).matrix()
+    T_dict= {'I': I, 'T': T}
+
+    if nqubits == 1:
+
+        if nT == 0:
+            c1k, c1u = random_clifford(nqubits,ignore_global_phase,letters)
+            return c1k, c1u
+        
+        if nT > 0:
+            c2k, c2u = random_clifford(nqubits,ignore_global_phase,letters)
+            return c2k+'.T.'+random_U_fixed_T(nqubits, nT-1, ignore_global_phase, letters)[0], c2u@T@random_U_fixed_T(nqubits, nT-1, ignore_global_phase, letters)[1]
+
+    if nqubits == 2:
+        if nT == 0:
+            c1k, c1u = random_clifford(nqubits,ignore_global_phase,letters)
+            return c1k, c1u
+
+        if nT == 1:
+            c2k, c2u = random_clifford(nqubits,ignore_global_phase,letters)
+            Tcount = 0
+            while Tcount != 1: # making sure we sample exactly one T to add 
+                ks = np.random.choice(['I','T'],2)
+                Tcount = (ks[0]+ks[1]).count('T')
+            TT = np.kron(T_dict[ks[0]],T_dict[ks[1]])
+            return c2k+f'.{ks[0]} \otimes {ks[1]}.'+random_U_fixed_T(nqubits, nT-Tcount, ignore_global_phase, letters)[0], c2u@TT@random_U_fixed_T(nqubits, nT-Tcount, ignore_global_phase, letters)[1]
+
+        if nT > 1:
+            c2k, c2u = random_clifford(nqubits,ignore_global_phase,letters)
+            Tcount = 0
+            while Tcount < 1: # making sure we sample at least one T to add 
+                ks = np.random.choice(['I','T'],2)
+                Tcount += (ks[0]+ks[1]).count('T')
+            TT = np.kron(T_dict[ks[0]],T_dict[ks[1]])
+            return c2k+f'.{ks[0]} \otimes {ks[1]}.'+random_U_fixed_T(nqubits, nT-Tcount, ignore_global_phase, letters)[0], c2u@TT@random_U_fixed_T(nqubits, nT-Tcount, ignore_global_phase, letters)[1]
+                
+
+
 ############################################## NOISY ###############################################
 
 
@@ -402,12 +496,13 @@ def apply_noise_to_basis(B,noise_model):
 
     # Noisy basis
     B_noisy = {k:apply_noise_to_channel(noise_model[k],B[k]) for k in B.keys()}
+    dsquared = len(noise_model[list(B.keys())[0]].to_liouville()) # useful for the span check below when B is an overcomplete basis
     print(f'Applied noise model to basis elements')
 
     # Gram matrix and LI check
     G = gram_matrix(list(B_noisy.values()))
     rank = np.linalg.matrix_rank(G)
-    if rank == len(B):
+    if rank == dsquared**2-dsquared+1:
         print(f'The noisy channels form a basis! :)')
     else:
         print(f"No longer a basis! :(\nOnly spanned {rank} directions")   
